@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>体征监测可视化</title>
+    <!-- 引入 MQTT.js 和 Chart.js -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f4f7f9;
+        }
+        header {
+            background: #2c3e50;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            padding: 20px;
+        }
+        .panel {
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin: 10px;
+            padding: 15px;
+            flex: 1;
+            min-width: 300px;
+        }
+        .panel h2 {
+            margin-top: 0;
+            font-size: 1.2em;
+            color: #333;
+        }
+        .data-item {
+            margin-bottom: 8px;
+        }
+        .data-item span {
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        .chart-container {
+            width: 100%;
+            padding: 20px;
+        }
+        .chart-container canvas {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .dropdown {
+            margin-bottom: 10px;
+        }
+        .dropdown select {
+            padding: 5px 10px;
+            font-size: 1em;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>体征监测可视化</h1>
+</header>
+
+<div class="container">
+    <!-- 设备 1 显示区 -->
+    <div id="device1" class="panel">
+        <h2>设备 1 数据</h2>
+        <div id="data1">
+            <div class="data-item"><span>HR:</span> --</div>
+            <div class="data-item"><span>SpO2:</span> --</div>
+            <div class="data-item"><span>ECG:</span> --</div>
+            <div class="data-item"><span>Temp:</span> --</div>
+            <div class="data-item"><span>Hum:</span> --</div>
+            <div class="data-item"><span>Gas:</span> --</div>
+            <div class="data-item"><span>Status:</span> --</div>
+        </div>
+    </div>
+    <!-- 设备 2 显示区 -->
+    <div id="device2" class="panel">
+        <h2>设备 2 数据</h2>
+        <div id="data2">
+            <div class="data-item"><span>HR:</span> --</div>
+            <div class="data-item"><span>SpO2:</span> --</div>
+            <div class="data-item"><span>ECG:</span> --</div>
+            <div class="data-item"><span>Temp:</span> --</div>
+            <div class="data-item"><span>Hum:</span> --</div>
+            <div class="data-item"><span>Gas:</span> --</div>
+            <div class="data-item"><span>Status:</span> --</div>
+        </div>
+    </div>
+</div>
+
+<!-- 历史数据折线图区域 -->
+<div class="chart-container">
+    <div class="dropdown">
+        <label for="chartSelect">选择曲线：</label>
+        <select id="chartSelect">
+            <option value="hr">心率 (HR)</option>
+            <option value="spo2">血氧 (SpO2)</option>
+            <option value="ecg">心电 (ECG)</option>
+            <option value="temp">温度 (Temp)</option>
+            <option value="hum">湿度 (Hum)</option>
+            <option value="gas">气体 (Gas)</option>
+        </select>
+    </div>
+    <canvas id="dataChart" width="800" height="400"></canvas>
+</div>
+
+<script>
+    // MQTT 配置（请替换为你的实际信息）：
+    const brokerUrl = 'ws://110.42.217.126:8083/mqtt'; // 如：ws://broker.emqx.io:8083/mqtt
+    const topic = 'LoRatopic/test';
+    const options = {
+        connectTimeout: 4000,
+        username: 'xxwu_LoRa',  // 替换为实际用户名
+        password: 'wuxuxu1.6',  // 替换为实际密码
+    };
+
+    const client = mqtt.connect(brokerUrl, options);
+
+    client.on('connect', () => {
+        console.log('MQTT 已连接');
+        client.subscribe(topic, (err) => {
+            if (err) console.error('订阅失败：', err);
+            else console.log('已订阅主题：' + topic);
+        });
+    });
+
+    // 用于存储历史数据（分别为设备 1 和 设备 2，各数据类型存储历史数据）
+    const historyData = {
+        device1: { hr: [], spo2: [], ecg: [], temp: [], hum: [], gas: [] },
+        device2: { hr: [], spo2: [], ecg: [], temp: [], hum: [], gas: [] }
+    };
+    const maxHistory = 50;  // 最多存储 50 个数据点
+
+    // 初始化 Chart.js 图表
+    const ctx = document.getElementById('dataChart').getContext('2d');
+    let currentCurve = 'hr';
+    let chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: '设备 1',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                data: []
+            }, {
+                label: '设备 2',
+                borderColor: 'rgba(255, 99, 132, 1)',
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                data: []
+            }]
+        },
+        options: {
+            responsive: true,
+            animation: false,
+            scales: {
+                x: {
+                    display: true,
+                    title: { display: true, text: '数据点' }
+                },
+                y: {
+                    display: true,
+                    title: { display: true, text: '数值' }
+                }
+            }
+        }
+    });
+
+    // 处理下拉菜单切换曲线
+    document.getElementById('chartSelect').addEventListener('change', function() {
+        currentCurve = this.value;
+        updateChart();
+    });
+
+    // 处理接收到的数据
+    client.on('message', (topic, message) => {
+        try {
+            const data = JSON.parse(message.toString());
+            // 根据 NO 字段区分设备
+            if (data.NO == 1) {
+                updateDeviceDisplay('device1', data);
+                updateHistory('device1', data);
+            } else if (data.NO == 2) {
+                updateDeviceDisplay('device2', data);
+                updateHistory('device2', data);
+            }
+            updateChart();
+        } catch (err) {
+            console.error('解析消息错误：', err);
+        }
+    });
+
+    // 更新设备显示区
+    function updateDeviceDisplay(deviceId, data) {
+        const container = document.getElementById(deviceId);
+        container.innerHTML = `<h2>设备 ${data.NO} 数据</h2>` +
+            `<div class="data-item"><span>HR:</span> ${data.HR}</div>` +
+            `<div class="data-item"><span>SpO2:</span> ${data.SpO2}</div>` +
+            `<div class="data-item"><span>ECG:</span> ${data.ECG}</div>` +
+            `<div class="data-item"><span>Temp:</span> ${data.Temp}</div>` +
+            `<div class="data-item"><span>Hum:</span> ${data.Hum}</div>` +
+            `<div class="data-item"><span>Gas:</span> ${data.Gas}</div>` +
+            `<div class="data-item"><span>Status:</span> ${data.Status}</div>`;
+    }
+
+    // 更新历史数据存储
+    function updateHistory(device, data) {
+        const mapping = { hr: 'HR', spo2: 'SpO2', ecg: 'ECG', temp: 'Temp', hum: 'Hum', gas: 'Gas' };
+        const key = mapping[currentCurve];
+        historyData[device][currentCurve].push(data[key]);
+        if (historyData[device][currentCurve].length > maxHistory) {
+            historyData[device][currentCurve].shift();
+        }
+    }
+
+    // 更新图表显示
+    function updateChart() {
+        const device1Data = historyData.device1[currentCurve];
+        const device2Data = historyData.device2[currentCurve];
+        const len = Math.max(device1Data.length, device2Data.length);
+        const labels = Array.from({length: len}, (_, i) => i + 1);
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = device1Data;
+        chart.data.datasets[1].data = device2Data;
+        chart.options.scales.y.title.text = currentCurve.toUpperCase();
+        chart.update();
+    }
+</script>
+</body>
+</html>
